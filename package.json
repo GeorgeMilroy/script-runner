@@ -1,0 +1,101 @@
+{
+  "name": "script-runner",
+  "displayName": "Script Runner",
+  "description": "A polished GUI for discovering and running NPM scripts with real-time output",
+  "version": "0.1.0",
+  "publisher": "MECoreLabs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/package.json",
+    "onWebviewPanel:scriptRunner"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "scriptRunner.open",
+        "title": "Open Script Runner",
+        "category": "Script Runner",
+        "icon": {
+          "light": "media/icon.svg",
+          "dark": "media/icon.svg"
+        }
+      },
+      {
+        "command": "scriptRunner.refresh",
+        "title": "Refresh Scripts",
+        "category": "Script Runner"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "scriptRunner.open",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "scriptRunner.open",
+          "when": "resourceFilename == package.json",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Script Runner",
+      "properties": {
+        "scriptRunner.packageManager": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "npm",
+            "yarn",
+            "pnpm"
+          ],
+          "default": "auto",
+          "description": "Package manager to use for running scripts. 'auto' detects based on lock files."
+        },
+        "scriptRunner.maxOutputLines": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of output chunks to keep per script"
+        },
+        "scriptRunner.clearOutputOnRerun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Clear previous output when re-running a script"
+        },
+        "scriptRunner.scanNested": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan for nested package.json files (monorepo support)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "vscode:prepublish": "npm run package",
+    "package": "npm run check-types && node esbuild.js --production",
+    "lint": "eslint src/"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "esbuild-plugin-copy": "^2.1.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.3.0"
+  }
+}
