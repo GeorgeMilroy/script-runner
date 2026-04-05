@@ -213,6 +213,17 @@ export class ScriptRunnerPanel {
         </button>
       </div>
     </header>
+    <nav id="env-filter-bar" role="tablist" aria-label="Environment filter">
+      <button class="env-tab active" data-env="all" role="tab" aria-selected="true">All</button>
+      <button class="env-tab" data-env="dev" role="tab" aria-selected="false">Dev</button>
+      <button class="env-tab" data-env="staging" role="tab" aria-selected="false">Staging</button>
+      <button class="env-tab" data-env="prod" role="tab" aria-selected="false">Prod</button>
+      <button class="env-tab" data-env="other" role="tab" aria-selected="false">Other</button>
+    </nav>
+    <div id="prod-banner" class="hidden" role="alert">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>Viewing production scripts &mdash; run with caution.</span>
+    </div>
     <main id="scripts-container">
       <div id="loading-state" class="state-message">
         <div class="loading-spinner"></div>
@@ -227,6 +238,19 @@ export class ScriptRunnerPanel {
       </div>
       <div id="script-cards"></div>
     </main>
+  </div>
+  <div id="prod-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="prod-modal-title">
+    <div class="modal-content">
+      <div class="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <h2 id="prod-modal-title">Production Environment</h2>
+      <p>You are about to view production scripts. Running these may affect live systems and real users. Please proceed with caution.</p>
+      <div class="modal-actions">
+        <button class="btn-ghost modal-btn" data-action="cancel-prod">Cancel</button>
+        <button class="btn-danger modal-btn" data-action="confirm-prod">Continue to Prod</button>
+      </div>
+    </div>
   </div>
   <script nonce="${nonce}" src="${ansiParserUriDist}"></script>
   <script nonce="${nonce}" src="${ansiParserUriSrc}"></script>

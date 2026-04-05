@@ -8,6 +8,8 @@
   var scripts = [];
   var scriptStates = {};
   var searchQuery = '';
+  var currentEnv = 'all';
+  var prodWarningShown = false; // transient per webview load
 
   // ===== DOM =====
   var searchInput = document.getElementById('search-input');
@@ -16,6 +18,9 @@
   var emptyState = document.getElementById('empty-state');
   var noResultsState = document.getElementById('no-results-state');
   var refreshBtn = document.getElementById('refresh-btn');
+  var envFilterBar = document.getElementById('env-filter-bar');
+  var prodBanner = document.getElementById('prod-banner');
+  var prodModal = document.getElementById('prod-modal');
 
   // ===== Init =====
   var previousState = vscode.getState();
@@ -23,6 +28,7 @@
     scripts = previousState.scripts || [];
     scriptStates = previousState.scriptStates || {};
     searchQuery = previousState.searchQuery || '';
+    currentEnv = previousState.currentEnv || 'all';
     searchInput.value = searchQuery;
 
     // Reset stale "running" states — processes don't survive VS Code restart
@@ -33,6 +39,7 @@
       }
     }
   }
+  updateEnvTabUi();
 
   vscode.postMessage({ type: 'ready' });
 
@@ -46,6 +53,61 @@
   refreshBtn.addEventListener('click', function () {
     vscode.postMessage({ type: 'refreshScripts' });
   });
+
+  envFilterBar.addEventListener('click', function (e) {
+    var tab = e.target.closest('.env-tab');
+    if (!tab) { return; }
+    var targetEnv = tab.dataset.env;
+    if (targetEnv === currentEnv) { return; }
+
+    if (targetEnv === 'prod' && !prodWarningShown) {
+      prodModal.classList.remove('hidden');
+      return;
+    }
+    applyEnvChange(targetEnv);
+  });
+
+  prodModal.addEventListener('click', function (e) {
+    var target = e.target.closest('[data-action]');
+    if (target) {
+      var action = target.dataset.action;
+      if (action === 'confirm-prod') {
+        prodWarningShown = true;
+        prodModal.classList.add('hidden');
+        applyEnvChange('prod');
+      } else if (action === 'cancel-prod') {
+        prodModal.classList.add('hidden');
+      }
+      return;
+    }
+    // Click on the overlay background (not inside .modal-content) closes it
+    if (e.target === prodModal) {
+      prodModal.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !prodModal.classList.contains('hidden')) {
+      prodModal.classList.add('hidden');
+    }
+  });
+
+  function applyEnvChange(newEnv) {
+    currentEnv = newEnv;
+    updateEnvTabUi();
+    saveState();
+    renderCards();
+  }
+
+  function updateEnvTabUi() {
+    var tabs = envFilterBar.querySelectorAll('.env-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      var isActive = tabs[i].dataset.env === currentEnv;
+      tabs[i].classList.toggle('active', isActive);
+      tabs[i].setAttribute('aria-selected', isActive ? 'true' : 'false');
+    }
+    prodBanner.classList.toggle('hidden', currentEnv !== 'prod');
+  }
 
   // ===== Messages from Extension =====
   window.addEventListener('message', function (event) {
@@ -180,45 +242,31 @@
 
     noResultsState.classList.add('hidden');
 
-    // Group by workspaceName
-    var groups = {};
-    var groupOrder = [];
-    for (var i = 0; i < filtered.length; i++) {
-      var s = filtered[i];
-      if (!groups[s.workspaceName]) {
-        groups[s.workspaceName] = [];
-        groupOrder.push(s.workspaceName);
-      }
-      groups[s.workspaceName].push(s);
+    // Show workspace badges only when scripts span multiple workspaces
+    var uniqueWorkspaces = {};
+    for (var i = 0; i < scripts.length; i++) {
+      uniqueWorkspaces[scripts[i].workspaceName] = true;
     }
+    var showWorkspaceBadge = Object.keys(uniqueWorkspaces).length > 1;
 
-    for (var g = 0; g < groupOrder.length; g++) {
-      var groupName = groupOrder[g];
-      var groupScripts = groups[groupName];
-
-      // Show group header if multiple groups
-      if (groupOrder.length > 1) {
-        var groupHeader = document.createElement('div');
-        groupHeader.className = 'group-header';
-        groupHeader.innerHTML = '<span class="group-label">' + escapeHtml(groupName) + '</span><span class="group-count">' + groupScripts.length + ' scripts</span>';
-        scriptCardsContainer.appendChild(groupHeader);
-      }
-
-      for (var j = 0; j < groupScripts.length; j++) {
-        var script = groupScripts[j];
-        var id = getScriptId(script);
-        var state = scriptStates[id] || { status: 'idle', output: [], expanded: false };
-        scriptCardsContainer.appendChild(createCard(script, id, state));
-      }
+    // Flat list, sorted naturally by script name (discovery already sorted by ws then name)
+    for (var k = 0; k < filtered.length; k++) {
+      var script = filtered[k];
+      var id = getScriptId(script);
+      var state = scriptStates[id] || { status: 'idle', output: [], expanded: false };
+      scriptCardsContainer.appendChild(createCard(script, id, state, showWorkspaceBadge));
     }
   }
 
-  function createCard(script, id, state) {
+  function createCard(script, id, state, showWorkspaceBadge) {
     var card = document.createElement('div');
     card.className = 'script-card ' + state.status;
     card.dataset.scriptId = id;
 
     var isRunning = state.status === 'running';
+    var workspaceBadgeHtml = showWorkspaceBadge
+      ? '<span class="workspace-badge" title="' + escapeHtml(script.workspaceName) + '">' + escapeHtml(script.workspaceName) + '</span>'
+      : '';
 
     var outputHtml = '';
     for (var i = 0; i < state.output.length; i++) {
@@ -245,6 +293,7 @@
             '</span>' +
             '<span class="script-name">' + escapeHtml(script.name) + '</span>' +
             envBadgeHtml +
+            workspaceBadgeHtml +
             '<span class="pm-badge">' + escapeHtml(script.packageManager) + '</span>' +
             statusLabel +
           '</div>' +
@@ -414,10 +463,33 @@
   // ===== Filtering =====
   function getFilteredScripts() {
     return scripts.filter(function (s) {
-      return !searchQuery ||
+      var matchesSearch = !searchQuery ||
         s.name.toLowerCase().includes(searchQuery) ||
         s.command.toLowerCase().includes(searchQuery);
+      if (!matchesSearch) { return false; }
+      if (currentEnv === 'all') { return true; }
+      return getScriptEnv(s) === currentEnv;
     });
+  }
+
+  // ===== Env bucket classification =====
+  // Maps a script to one of: 'dev' | 'staging' | 'prod' | 'other'
+  // Mirrors the keyword sets in ENV_TAGS so the filter matches the card badge.
+  var ENV_BUCKETS = [
+    { env: 'prod', keys: ['prod', 'production'] },
+    { env: 'staging', keys: ['staging', 'stage'] },
+    { env: 'dev', keys: ['dev', 'start', 'serve', 'watch', 'emulator'] },
+  ];
+
+  function getScriptEnv(script) {
+    var name = script.name.toLowerCase();
+    for (var i = 0; i < ENV_BUCKETS.length; i++) {
+      var bucket = ENV_BUCKETS[i];
+      for (var j = 0; j < bucket.keys.length; j++) {
+        if (name.includes(bucket.keys[j])) { return bucket.env; }
+      }
+    }
+    return 'other';
   }
 
   // ===== Environment Tags =====
@@ -481,6 +553,7 @@
       scripts: scripts,
       scriptStates: scriptStates,
       searchQuery: searchQuery,
+      currentEnv: currentEnv,
     });
   }
 })();
