@@ -9,7 +9,8 @@
   var scriptStates = {};
   var searchQuery = '';
   var currentEnv = 'all';
-  var prodWarningShown = false; // transient per webview load
+  var prodWarningShown = false; // transient per webview load — gates the tab switch only
+  var pendingProd = null; // { kind: 'tab' } | { kind: 'run', scriptId, scriptName, command }
 
   // ===== DOM =====
   var searchInput = document.getElementById('search-input');
@@ -21,6 +22,11 @@
   var envFilterBar = document.getElementById('env-filter-bar');
   var prodBanner = document.getElementById('prod-banner');
   var prodModal = document.getElementById('prod-modal');
+  var prodModalTitle = document.getElementById('prod-modal-title');
+  var prodModalBody = document.getElementById('prod-modal-body');
+  var prodModalCommand = document.getElementById('prod-modal-command');
+  var prodModalConfirm = document.getElementById('prod-modal-confirm');
+  var prodModalCancel = document.getElementById('prod-modal-cancel');
 
   // ===== Init =====
   var previousState = vscode.getState();
@@ -61,7 +67,7 @@
     if (targetEnv === currentEnv) { return; }
 
     if (targetEnv === 'prod' && !prodWarningShown) {
-      prodModal.classList.remove('hidden');
+      openProdModal({ kind: 'tab' });
       return;
     }
     applyEnvChange(targetEnv);
@@ -72,25 +78,63 @@
     if (target) {
       var action = target.dataset.action;
       if (action === 'confirm-prod') {
-        prodWarningShown = true;
-        prodModal.classList.add('hidden');
-        applyEnvChange('prod');
+        var pending = pendingProd;
+        closeProdModal();
+        if (!pending) { return; }
+        if (pending.kind === 'run') {
+          vscode.postMessage({ type: 'runScript', scriptId: pending.scriptId });
+        } else {
+          prodWarningShown = true;
+          applyEnvChange('prod');
+        }
       } else if (action === 'cancel-prod') {
-        prodModal.classList.add('hidden');
+        closeProdModal();
       }
       return;
     }
     // Click on the overlay background (not inside .modal-content) closes it
     if (e.target === prodModal) {
-      prodModal.classList.add('hidden');
+      closeProdModal();
     }
   });
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !prodModal.classList.contains('hidden')) {
-      prodModal.classList.add('hidden');
+      closeProdModal();
     }
   });
+
+  // ===== Prod confirmation modal =====
+  // Two entry points: switching to the Prod tab (once per webview load) and
+  // running a prod-tagged script (every time — it can hit live systems).
+  function openProdModal(pending) {
+    pendingProd = pending;
+
+    if (pending.kind === 'run') {
+      prodModalTitle.textContent = 'Run a production script?';
+      prodModalBody.textContent =
+        '"' + pending.scriptName + '" targets production. Running it may affect live systems and real users.';
+      prodModalCommand.textContent = pending.command;
+      prodModalCommand.classList.remove('hidden');
+      prodModalConfirm.textContent = 'Run in Prod';
+    } else {
+      prodModalTitle.textContent = 'Production Environment';
+      prodModalBody.textContent =
+        'You are about to view production scripts. Running these may affect live systems and real users. Please proceed with caution.';
+      prodModalCommand.textContent = '';
+      prodModalCommand.classList.add('hidden');
+      prodModalConfirm.textContent = 'Continue to Prod';
+    }
+
+    prodModal.classList.remove('hidden');
+    // Focus Cancel, not Confirm — a stray Enter must never fire a prod deploy
+    prodModalCancel.focus();
+  }
+
+  function closeProdModal() {
+    pendingProd = null;
+    prodModal.classList.add('hidden');
+  }
 
   function applyEnvChange(newEnv) {
     currentEnv = newEnv;
@@ -279,10 +323,11 @@
     else if (state.status === 'error') { statusLabel = '<span class="status-label error">Failed</span>'; }
     else if (state.status === 'stopped') { statusLabel = '<span class="status-label stopped">Stopped</span>'; }
 
-    var envTag = getEnvTag(script.name);
-    var envBadgeHtml = envTag
-      ? '<span class="env-tag ' + envTag.cls + '">' + envTag.icon + ' ' + envTag.label + '</span>'
-      : '';
+    var tags = getScriptTags(script.name);
+    var envBadgeHtml = '';
+    for (var t = 0; t < tags.length; t++) {
+      envBadgeHtml += '<span class="env-tag ' + tags[t].cls + '">' + tags[t].icon + ' ' + tags[t].label + '</span>';
+    }
 
     card.innerHTML =
       '<div class="card-header" data-action="toggle">' +
@@ -364,6 +409,15 @@
           break;
         case 'run':
           e.stopPropagation();
+          if (getScriptEnv(script) === 'prod') {
+            openProdModal({
+              kind: 'run',
+              scriptId: id,
+              scriptName: script.name,
+              command: script.command,
+            });
+            break;
+          }
           vscode.postMessage({ type: 'runScript', scriptId: id });
           break;
         case 'stop':
@@ -493,10 +547,13 @@
   }
 
   // ===== Environment Tags =====
-  // Two-pass matching: environment keywords win over action keywords.
-  // e.g. "deploy:prod:functions" → PROD, "build:staging:admin" → STAGING, plain "build:all" → BUILD
+  // Two independent passes: a script can carry both an environment tag and an
+  // action tag, and gets whichever of the two it matches.
+  // e.g. "ship:all:prod" → PROD + DEPLOY, "build:staging" → STAGING + BUILD,
+  //      "ship:functions" → DEPLOY only, "serve:admin" → DEV only.
+  // The environment tag is always rendered first — the env is what matters most.
 
-  // Pass 1: Environment (highest priority — the env is what matters most)
+  // Pass 1: Environment (which system the script targets)
   var ENV_TAGS = [
     { keys: ['prod', 'production'], label: 'prod', cls: 'env-prod',
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>' },
@@ -506,9 +563,9 @@
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>' },
   ];
 
-  // Pass 2: Action type (fallback when no environment keyword matched)
+  // Pass 2: Action type (what the script does, independent of which env it targets)
   var ACTION_TAGS = [
-    { keys: ['deploy', 'release'], label: 'deploy', cls: 'env-deploy',
+    { keys: ['deploy', 'release', 'ship', 'publish'], label: 'deploy', cls: 'env-deploy',
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>' },
     { keys: ['build', 'compile', 'bundle'], label: 'build', cls: 'env-build',
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>' },
@@ -531,10 +588,15 @@
     return null;
   }
 
-  function getEnvTag(scriptName) {
+  function getScriptTags(scriptName) {
     var name = scriptName.toLowerCase();
-    // Environment keywords always win
-    return matchTags(name, ENV_TAGS) || matchTags(name, ACTION_TAGS);
+    var tags = [];
+    var envTag = matchTags(name, ENV_TAGS);
+    var actionTag = matchTags(name, ACTION_TAGS);
+    // Environment first so it reads left-to-right as "where, then what"
+    if (envTag) { tags.push(envTag); }
+    if (actionTag && actionTag.cls !== (envTag && envTag.cls)) { tags.push(actionTag); }
+    return tags;
   }
 
   // ===== Utilities =====

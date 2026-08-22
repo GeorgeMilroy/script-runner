@@ -2,14 +2,24 @@
   "name": "script-runner",
   "displayName": "Script Runner",
   "description": "A polished GUI for discovering and running NPM scripts with real-time output",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "publisher": "MECoreLabs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GeorgeMilroy/Script-Runner.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
   ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#5B4BF2",
+    "theme": "dark"
+  },
   "activationEvents": [
     "workspaceContains:**/package.json",
     "onWebviewPanel:scriptRunner"
@@ -46,6 +56,20 @@
           "when": "resourceFilename == package.json",
           "group": "navigation"
         }
+      ],
+      "explorer/context": [
+        {
+          "command": "scriptRunner.open",
+          "when": "resourceFilename == package.json",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "scriptRunner.open",
+          "when": "resourceFilename == package.json",
+          "group": "navigation@9"
+        }
       ]
     },
     "configuration": {
@@ -76,6 +100,11 @@
           "type": "boolean",
           "default": true,
           "description": "Scan for nested package.json files (monorepo support)"
+        },
+        "scriptRunner.showStatusBarItem": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a Script Runner button in the status bar for one-click access"
         }
       }
     }
@@ -86,6 +115,7 @@
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "icon": "node scripts/generate-icon.mjs",
     "vscode:prepublish": "npm run package",
     "package": "npm run check-types && node esbuild.js --production",
     "lint": "eslint src/"
