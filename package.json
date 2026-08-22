@@ -2,7 +2,7 @@
   "name": "script-runner",
   "displayName": "Script Runner",
   "description": "A polished GUI for discovering and running NPM scripts with real-time output",
-  "version": "0.3.0",
+  "version": "1.3.1",
   "publisher": "MECoreLabs",
   "license": "MIT",
   "repository": {
