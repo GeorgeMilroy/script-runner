@@ -1,4 +1,4 @@
-# Script Runner
+# Script Runner GUI
 
 A polished VS Code extension that provides a GUI for discovering and running NPM scripts with real-time output, ANSI color support, and monorepo awareness.
 
